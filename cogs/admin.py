@@ -307,8 +307,3 @@ async def setup(bot: commands.Bot):
 ```[cite: 1]
 
 ---
-
-### O que acontece agora com essa atualização:
-1. **Imagem nos Produtos:** Quando você cadastrar um produto usando `/produto_adicionar`, preenchendo o campo `imagem_url` com o link de uma imagem (pode mandar a imagem no Discord, copiar o link dela e colar lá), a vitrine vai exibir a foto bonitona no Embed[cite: 1].
-2. **Chat Privado Automático:** Ao clicar em **Comprar Produto**, o bot cria instantaneamente um canal privado (ex: `#carrinho-nome-do-usuario`), onde só você e o cliente têm acesso. 
-3. **Modal de Parceiro + Checkout Kiwify:** Logo em seguida abre a caixinha para o cliente colocar o código do parceiro, e o link de pagamento da Kiwify aparece protegido e isolado dentro desse canal privado dele[cite: 1].
