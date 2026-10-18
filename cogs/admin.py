@@ -95,6 +95,3 @@ class AdminCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(AdminCog(bot))
-```[cite: 1]
-
-Assim que salvar no GitHub, o erro de sintaxe vai desaparecer e o bot ligará normalmente no Railway!
