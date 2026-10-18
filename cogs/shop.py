@@ -12,7 +12,7 @@ class ShopView(discord.ui.View):
         self.produto = produto
         
     @discord.ui.button(label="Comprar Produto", style=discord.ButtonStyle.green, emoji="🛒")
-    async def comprar(self, interaction: discord.interaction, button: discord.ui.Button):
+    async def comprar(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Pergunta se tem código de parceiro
         modal = PartnerCodeModal(self.produto)
         await interaction.response.send_modal(modal)
