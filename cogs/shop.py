@@ -4,7 +4,6 @@ from discord import app_commands
 import os
 from supabase import create_client, Client
 
-# Configuração da conexão com o Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
@@ -12,37 +11,69 @@ supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Lista dos pacotes com links oficiais da Kiwify
-PRODUTOS_KIWIFY = [
-    {
-        "id": "1_img",
-        "nome": "1 Imagem",
-        "descricao": "Uma modelagem de IA Profissional e realista",
-        "preco": "R$ 10,00",
-        "url": "https://pay.kiwify.com.br/2319B39"
-    },
-    {
-        "id": "3_img",
-        "nome": "3 Imagens",
-        "descricao": "Pacote com 3 modelagens de IA Profissionais e realistas",
-        "preco": "R$ 25,00",
-        "url": "https://pay.kiwify.com.br/PKXZt40"
-    },
-    {
-        "id": "5_img",
-        "nome": "5 Imagens (Mais Vendido 🔥)",
-        "descricao": "Pacote recomendado com 5 modelagens de IA Profissionais",
-        "preco": "R$ 35,00",
-        "url": "https://pay.kiwify.com.br/YDrz5qb"
-    },
-    {
-        "id": "10_img",
-        "nome": "10 Imagens (Super Oferta 🚀)",
-        "descricao": "Pacote completo com 10 modelagens de IA Profissionais",
-        "preco": "R$ 60,00",
-        "url": "https://pay.kiwify.com.br/ie8Ah1m"
-    }
-]
+# --- SISTEMA DE PAGINAÇÃO PARA A LOJA ---
+class ShopPaginator(discord.ui.View):
+    def __init__(self, produtos: list):
+        super().__init__(timeout=180)
+        self.produtos = produtos
+        self.current_page = 0
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_page.disabled = self.current_page == 0
+        self.next_page.disabled = self.current_page == len(self.produtos) - 1
+
+    def get_embed_and_view(self):
+        prod = self.produtos[self.current_page]
+        
+        embed = discord.Embed(
+            title=f"🛍️ {prod.get('name', 'Produto')}",
+            description=prod.get('description', 'Sem descrição'),
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Preço", value=f"**R$ {float(prod.get('price', 0)):.2f}**", inline=True)
+        embed.set_footer(text=f"Página {self.current_page + 1} de {len(self.produtos)} • Checkout Seguro Kiwify")
+        
+        # Remove itens anteriores da view de botões e readiciona
+        self.clear_items()
+        
+        # Botão de Navegação: Anterior
+        self.add_item(self.prev_page)
+        # Botão de Navegação: Próximo
+        self.add_item(self.next_page)
+        
+        # Botão de Comprar da Kiwify
+        url_kiwify = prod.get('url', 'https://kiwify.com.br')
+        btn_buy = discord.ui.Button(label="Comprar Produto", style=discord.ButtonStyle.success, emoji="🛒", row=1)
+        
+        async def buy_callback(interaction: discord.Interaction):
+            await interaction.response.send_modal(PartnerCodeModal(prod))
+        
+        btn_buy.callback = buy_callback
+        self.add_item(btn_buy)
+        
+        return embed, self
+
+    @discord.ui.button(label="◀️ Anterior", style=discord.ButtonStyle.secondary, row=0)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_buttons()
+            embed, view = self.get_embed_and_view()
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await interaction.response.defer()
+
+    @discord.ui.button(label="Próximo ▶️", style=discord.ButtonStyle.secondary, row=0)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < len(self.produtos) - 1:
+            self.current_page += 1
+            self.update_buttons()
+            embed, view = self.get_embed_and_view()
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await interaction.response.defer()
+
 
 class PartnerCodeModal(discord.ui.Modal, title="Código de Parceiro / Indicação"):
     partner_code = discord.ui.TextInput(
@@ -59,83 +90,118 @@ class PartnerCodeModal(discord.ui.Modal, title="Código de Parceiro / Indicaçã
     async def on_submit(self, interaction: discord.Interaction):
         codigo = self.partner_code.value.strip() if self.partner_code.value else None
         
-        # Registra a intenção de compra no Supabase se houver código de parceiro
         if codigo and supabase:
             try:
                 supabase.table("intencoes_compra").insert({
                     "user_id": str(interaction.user.id),
                     "user_name": str(interaction.user),
-                    "product_id": self.produto["id"],
+                    "product_id": str(self.produto.get("id")),
                     "partner_code": codigo,
-                    "price": self.produto["preco"]
+                    "price": str(self.produto.get("price"))
                 }).execute()
             except Exception as e:
-                print(f"[Aviso] Erro ao registrar código de parceiro no banco: {e}")
+                print(f"[Aviso] Erro ao registrar intenção: {e}")
 
-        # Cria a View com o botão direto da Kiwify
         view = discord.ui.View()
         btn_pay = discord.ui.Button(
-            label=f"Pagar {self.produto['preco']} na Kiwify",
+            label="Concluir Pagamento na Kiwify",
             style=discord.ButtonStyle.link,
-            url=self.produto["url"],
+            url=self.produto.get("url", "https://kiwify.com.br"),
             emoji="💳"
         )
         view.add_item(btn_pay)
 
         embed = discord.Embed(
-            title=f"🛒 Checkout: {self.produto['nome']}",
+            title=f"🛒 Checkout: {self.produto.get('name')}",
             description=(
-                f"**Valor:** {self.produto['preco']}\n"
-                f"{f'**Código do Parceiro Aplicado:** `{codigo}`' if codigo else ''}\n\n"
-                "Clique no botão abaixo para concluir o pagamento com total segurança e privacidade na Kiwify!"
+                f"**Valor:** R$ {float(self.produto.get('price', 0)):.2f}\n"
+                f"{f'**Parceiro:** `{codigo}`' if codigo else ''}\n\n"
+                "Clique no botão abaixo para abrir o checkout seguro da Kiwify!"
             ),
             color=discord.Color.green()
         )
-        embed.set_footer(text="Pagamento via Pix ou Cartão com confirmação rápida.")
-
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-
-class ProductView(discord.ui.View):
-    def __init__(self, produto: dict):
-        super().__init__(timeout=None)
-        self.produto = produto
-
-        # Botão para iniciar o checkout
-        btn_buy = discord.ui.Button(
-            label="Comprar Produto",
-            style=discord.ButtonStyle.success,
-            emoji="🛒"
-        )
-        btn_buy.callback = self.buy_callback
-        self.add_item(btn_buy)
-
-    async def buy_callback(self, interaction: discord.Interaction):
-        # Abre o Modal para o cliente inserir o código do parceiro antes de gerar o link
-        await interaction.response.send_modal(PartnerCodeModal(self.produto))
 
 
 class ShopCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="loja", description="Abre a vitrine de pacotes de imagem")
+    @app_commands.command(name="loja", description="Abre a vitrine paginada de produtos")
     async def loja(self, interaction: discord.Interaction):
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
 
-        for prod in PRODUTOS_KIWIFY:
-            embed = discord.Embed(
-                title=prod["nome"],
-                description=prod["descricao"],
-                color=discord.Color.blue()
-            )
-            embed.add_field(name="Preço", value=f"`{prod['preco']}`", inline=True)
-            embed.set_footer(text="Privacidade garantida • Checkout Kiwify")
+        if not supabase:
+            await interaction.followup.send("❌ Erro: Supabase não configurado.", ephemeral=True)
+            return
 
-            view = ProductView(prod)
-            await interaction.channel.send(embed=embed, view=view)
+        response = supabase.table("products").select("*").execute()
+        produtos = response.data
 
-        await interaction.followup.send("🛍️ Vitrine carregada com sucesso!", ephemeral=True)
+        if not produtos:
+            await interaction.followup.send("🛍️ Nenhum produto cadastrado no momento.", ephemeral=True)
+            return
+
+        paginator = ShopPaginator(produtos)
+        embed, view = paginator.get_embed_and_view()
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+    # --- COMANDOS ADMINISTRATIVOS PARA GERENCIAR DIRETO PELO DISCORD ---
+
+    @app_commands.command(name="produto_adicionar", description="Adiciona um novo produto à loja")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def produto_adicionar(self, interaction: discord.Interaction, nome: str, preco: float, url_kiwify: str, descricao: str):
+        if not supabase:
+            await interaction.response.send_message("❌ Banco de dados desativado.", ephemeral=True)
+            return
+
+        try:
+            supabase.table("products").insert({
+                "name": nome,
+                "price": preco,
+                "url": url_kiwify,
+                "description": descricao
+            }).execute()
+            await interaction.response.send_message(f"✅ Produto **{nome}** adicionado com sucesso!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Erro ao adicionar: {e}", ephemeral=True)
+
+    @app_commands.command(name="produto_editar", description="Edita um produto existente pelo ID do Supabase")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def produto_editar(self, interaction: discord.Interaction, id_produto: int, novo_nome: str = None, novo_preco: float = None, nova_url: str = None, nova_descricao: str = None):
+        if not supabase:
+            await interaction.response.send_message("❌ Banco de dados desativado.", ephemeral=True)
+            return
+
+        dados_atualizados = {}
+        if novo_nome: dados_atualizados["name"] = novo_nome
+        if novo_preco: dados_atualizados["price"] = novo_preco
+        if nova_url: dados_atualizados["url"] = nova_url
+        if nova_descricao: dados_atualizados["description"] = nova_descricao
+
+        if not dados_atualizados:
+            await interaction.response.send_message("⚠️ Você precisa informar ao menos um campo para alterar.", ephemeral=True)
+            return
+
+        try:
+            supabase.table("products").update(dados_atualizados).eq("id", id_produto).execute()
+            await interaction.response.send_message(f"✅ Produto ID `{id_produto}` atualizado com sucesso!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Erro ao atualizar: {e}", ephemeral=True)
+
+    @app_commands.command(name="produto_remover", description="Remove um produto pelo ID")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def produto_remover(self, interaction: discord.Interaction, id_produto: int):
+        if not supabase:
+            await interaction.response.send_message("❌ Banco de dados desativado.", ephemeral=True)
+            return
+
+        try:
+            supabase.table("products").update({"is_active": False}).eq("id", id_produto).execute() # ou delete()
+            supabase.table("products").delete().eq("id", id_produto).execute()
+            await interaction.response.send_message(f"🗑️ Produto ID `{id_produto}` removido com sucesso!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Erro ao remover: {e}", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(ShopCog(bot))
