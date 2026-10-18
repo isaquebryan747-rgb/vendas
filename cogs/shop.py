@@ -1,113 +1,141 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from services.shop_service import ShopService
-from services.partner_service import PartnerService
-from utils.pix import gerar_payload_pix
-from config import PIX_KEY, PIX_NAME, PIX_CITY
+import os
+from supabase import create_client, Client
 
-class ShopView(discord.ui.View):
-    def __init__(self, produto):
-        super().__init__(timeout=180)
-        self.produto = produto
-        
-    @discord.ui.button(label="Comprar Produto", style=discord.ButtonStyle.green, emoji="🛒")
-    async def comprar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Pergunta se tem código de parceiro
-        modal = PartnerCodeModal(self.produto)
-        await interaction.response.send_modal(modal)
+# Configuração da conexão com o Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-class PartnerCodeModal(discord.ui.Modal, title="Finalizar Pedido - Bravo Studio"):
-    def __init__(self, produto):
+supabase: Client = None
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Lista dos pacotes com links oficiais da Kiwify
+PRODUTOS_KIWIFY = [
+    {
+        "id": "1_img",
+        "nome": "1 Imagem",
+        "descricao": "Uma modelagem de IA Profissional e realista",
+        "preco": "R$ 10,00",
+        "url": "https://pay.kiwify.com.br/2319B39"
+    },
+    {
+        "id": "3_img",
+        "nome": "3 Imagens",
+        "descricao": "Pacote com 3 modelagens de IA Profissionais e realistas",
+        "preco": "R$ 25,00",
+        "url": "https://pay.kiwify.com.br/PKXZt40"
+    },
+    {
+        "id": "5_img",
+        "nome": "5 Imagens (Mais Vendido 🔥)",
+        "descricao": "Pacote recomendado com 5 modelagens de IA Profissionais",
+        "preco": "R$ 35,00",
+        "url": "https://pay.kiwify.com.br/YDrz5qb"
+    },
+    {
+        "id": "10_img",
+        "nome": "10 Imagens (Super Oferta 🚀)",
+        "descricao": "Pacote completo com 10 modelagens de IA Profissionais",
+        "preco": "R$ 60,00",
+        "url": "https://pay.kiwify.com.br/ie8Ah1m"
+    }
+]
+
+class PartnerCodeModal(discord.ui.Modal, title="Código de Parceiro / Indicação"):
+    partner_code = discord.ui.TextInput(
+        label="Digite o código do parceiro (Opcional)",
+        placeholder="Ex: PARCEIRO10",
+        required=False,
+        max_length=50
+    )
+
+    def __init__(self, produto: dict):
         super().__init__()
         self.produto = produto
 
-    partner_code = discord.ui.TextInput(
-        label="Código de Parceiro (Opcional)",
-        placeholder="Ex: BRAVO-ABC123",
-        required=False,
-        max_length=20
-    )
-
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        codigo = self.partner_code.value.strip() if self.partner_code.value else None
         
-        code = self.partner_code.value.strip().upper() if self.partner_code.value else None
-        
-        # Valida parceiro se informado
-        if code:
-            parceiro = PartnerService.buscar_por_codigo(code)
-            if not parceiro or parceiro["status"] != "APPROVED":
-                await interaction.followup.send("⚠️ Código de parceiro inválido ou não aprovado. O pedido continuará sem indicação.", ephemeral=True)
-                code = None
-            elif parceiro["discord_id"] == interaction.user.id:
-                await interaction.followup.send("⚠️ Você não pode usar o seu próprio código de parceiro. O pedido continuará sem indicação.", ephemeral=True)
-                code = None
+        # Registra a intenção de compra no Supabase se houver código de parceiro
+        if codigo and supabase:
+            try:
+                supabase.table("intencoes_compra").insert({
+                    "user_id": str(interaction.user.id),
+                    "user_name": str(interaction.user),
+                    "product_id": self.produto["id"],
+                    "partner_code": codigo,
+                    "price": self.produto["preco"]
+                }).execute()
+            except Exception as e:
+                print(f"[Aviso] Erro ao registrar código de parceiro no banco: {e}")
 
-        # Cria o pedido no banco
-        pedido = ShopService.criar_pedido(
-            customer_id=interaction.user.id,
-            product_id=self.produto["id"],
-            amount=self.produto["price"],
-            partner_code=code
+        # Cria a View com o botão direto da Kiwify
+        view = discord.ui.View()
+        btn_pay = discord.ui.Button(
+            label=f"Pagar {self.produto['preco']} na Kiwify",
+            style=discord.ButtonStyle.link,
+            url=self.produto["url"],
+            emoji="💳"
         )
-
-        if not pedido:
-            await interaction.followup.send("❌ Erro ao gerar o pedido. Tente novamente mais tarde.", ephemeral=True)
-            return
-
-        # Gera o Pix Copia e Cola
-        payload_pix = gerar_payload_pix(
-            chave=PIX_KEY,
-            nome=PIX_NAME,
-            cidade=PIX_CITY,
-            valor=float(self.produto["price"]),
-            identificador=pedido["order_code"]
-        )
+        view.add_item(btn_pay)
 
         embed = discord.Embed(
-            title=f"🛒 Pedido Criado: {pedido['order_code']}",
+            title=f"🛒 Checkout: {self.produto['nome']}",
             description=(
-                f"**Produto:** {self.produto['name']}\n"
-                f"**Valor:** R$ {float(self.produto['price']):.2f}\n\n"
-                f"Para concluir sua compra, faça o pagamento via **Pix** utilizando a chave abaixo ou o código Copia e Cola."
+                f"**Valor:** {self.produto['preco']}\n"
+                f"{f'**Código do Parceiro Aplicado:** `{codigo}`' if codigo else ''}\n\n"
+                "Clique no botão abaixo para concluir o pagamento com total segurança e privacidade na Kiwify!"
             ),
-            color=discord.Color.gold()
+            color=discord.Color.green()
         )
-        embed.add_field(name="Chave Pix", value=f"`{PIX_KEY}`", inline=False)
-        embed.add_field(name="Pix Copia e Cola", value=f"```text\n{payload_pix}\n```", inline=False)
-        embed.set_footer(text="Após o pagamento, um administrador confirmará seu pedido em breve.")
+        embed.set_footer(text="Pagamento via Pix ou Cartão com confirmação rápida.")
 
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+class ProductView(discord.ui.View):
+    def __init__(self, produto: dict):
+        super().__init__(timeout=None)
+        self.produto = produto
+
+        # Botão para iniciar o checkout
+        btn_buy = discord.ui.Button(
+            label="Comprar Produto",
+            style=discord.ButtonStyle.success,
+            emoji="🛒"
+        )
+        btn_buy.callback = self.buy_callback
+        self.add_item(btn_buy)
+
+    async def buy_callback(self, interaction: discord.Interaction):
+        # Abre o Modal para o cliente inserir o código do parceiro antes de gerar o link
+        await interaction.response.send_modal(PartnerCodeModal(self.produto))
+
 
 class ShopCog(commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @app_commands.command(name="loja", description="Exibe o catálogo de produtos da Bravo Studio")
+    @app_commands.command(name="loja", description="Abre a vitrine de pacotes de imagem")
     async def loja(self, interaction: discord.Interaction):
-        produtos = ShopService.listar_produtos()
-        
-        if not produtos:
-            await interaction.response.send_message("Desculpe, não há produtos disponíveis no momento.", ephemeral=True)
-            return
+        await interaction.response.defer()
 
-        for p in produtos:
+        for prod in PRODUTOS_KIWIFY:
             embed = discord.Embed(
-                title=p["name"],
-                description=p["description"] or "Sem descrição.",
+                title=prod["nome"],
+                description=prod["descricao"],
                 color=discord.Color.blue()
             )
-            embed.add_field(name="Preço", value=f"R$ {float(p['price']):.2f}", inline=True)
-            embed.add_field(name="Categoria", value=p["category"] or "Geral", inline=True)
-            
-            if p["image_url"]:
-                embed.set_image(url=p["image_url"])
-                
-            view = ShopView(p)
+            embed.add_field(name="Preço", value=f"`{prod['preco']}`", inline=True)
+            embed.set_footer(text="Privacidade garantida • Checkout Kiwify")
+
+            view = ProductView(prod)
             await interaction.channel.send(embed=embed, view=view)
 
-        await interaction.response.send_message("📦 Catálogo carregado com sucesso!", ephemeral=True)
+        await interaction.followup.send("🛍️ Vitrine carregada com sucesso!", ephemeral=True)
 
-async def setup(bot):
+async def setup(bot: commands.Bot):
     await bot.add_cog(ShopCog(bot))
