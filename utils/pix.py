@@ -1,9 +1,8 @@
 import crcmod
 
 def gerar_crc16(dados: str) -> str:
-    # O crcmod exige o tamanho em bits (16) no primeiro argumento, 
-    # e o polinômio do Pix (0x1021) passado através do argumento 'poly'.
-    crc_func = crcmod.mkCrcFun(16, poly=0x1021, initCrc=0xFFFF, rev=False, xorOut=0x0000)
+    # Cria a função CRC16 padrão do Pix usando o gerador padrão do crcmod para o polinômio 0x1021
+    crc_func = crcmod.Crc(0x1021, rev=False, initCrc=0xFFFF, xorOut=0x0000).crc
     
     # Adiciona os bytes indicativos do CRC do Pix ("6304")
     dados_com_crc = dados + "6304"
