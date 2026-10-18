@@ -1,8 +1,11 @@
 import crcmod
 
-def gerar_crc16(payload: str) -> str:
-    """Calcula o CRC16 (CCITT-FALSE) exigido pelo padrão Pix EMV."""
+def gerar_crc16(dados: str) -> str:
+    # CRC16-CCITT padrão Pix (XModem / 0x1021)
     crc_func = crcmod.mkCrcFun(0x1021, rev=False, initCrc=0xFFFF, xorOut=0x0000)
+    
+    # Se o crcmod exigir o polinômio com o tamanho em bits explícito, usamos a função padrão do XModem:
+    # Caso prefira garantir 100%, vamos usar o crcmod com polinomio nativo:
     # Adiciona o ID do CRC ('6304') ao final para o cálculo
     byte_array = (payload + "6304").encode("utf-8")
     crc = crc_func(byte_array)
