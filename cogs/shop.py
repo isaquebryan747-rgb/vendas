@@ -34,15 +34,11 @@ class ShopPaginator(discord.ui.View):
         embed.add_field(name="Preço", value=f"**R$ {float(prod.get('price', 0)):.2f}**", inline=True)
         embed.set_footer(text=f"Página {self.current_page + 1} de {len(self.produtos)} • Checkout Seguro Kiwify")
         
-        # Remove itens anteriores da view de botões e readiciona
         self.clear_items()
         
-        # Botão de Navegação: Anterior
         self.add_item(self.prev_page)
-        # Botão de Navegação: Próximo
         self.add_item(self.next_page)
         
-        # Botão de Comprar da Kiwify
         url_kiwify = prod.get('url', 'https://kiwify.com.br')
         btn_buy = discord.ui.Button(label="Comprar Produto", style=discord.ButtonStyle.success, emoji="🛒", row=1)
         
@@ -145,63 +141,6 @@ class ShopCog(commands.Cog):
         paginator = ShopPaginator(produtos)
         embed, view = paginator.get_embed_and_view()
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-
-    # --- COMANDOS ADMINISTRATIVOS PARA GERENCIAR DIRETO PELO DISCORD ---
-
-    @app_commands.command(name="produto_adicionar", description="Adiciona um novo produto à loja")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def produto_adicionar(self, interaction: discord.Interaction, nome: str, preco: float, url_kiwify: str, descricao: str):
-        if not supabase:
-            await interaction.response.send_message("❌ Banco de dados desativado.", ephemeral=True)
-            return
-
-        try:
-            supabase.table("products").insert({
-                "name": nome,
-                "price": preco,
-                "url": url_kiwify,
-                "description": descricao
-            }).execute()
-            await interaction.response.send_message(f"✅ Produto **{nome}** adicionado com sucesso!", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Erro ao adicionar: {e}", ephemeral=True)
-
-    @app_commands.command(name="produto_editar", description="Edita um produto existente pelo ID do Supabase")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def produto_editar(self, interaction: discord.Interaction, id_produto: int, novo_nome: str = None, novo_preco: float = None, nova_url: str = None, nova_descricao: str = None):
-        if not supabase:
-            await interaction.response.send_message("❌ Banco de dados desativado.", ephemeral=True)
-            return
-
-        dados_atualizados = {}
-        if novo_nome: dados_atualizados["name"] = novo_nome
-        if novo_preco: dados_atualizados["price"] = novo_preco
-        if nova_url: dados_atualizados["url"] = nova_url
-        if nova_descricao: dados_atualizados["description"] = nova_descricao
-
-        if not dados_atualizados:
-            await interaction.response.send_message("⚠️ Você precisa informar ao menos um campo para alterar.", ephemeral=True)
-            return
-
-        try:
-            supabase.table("products").update(dados_atualizados).eq("id", id_produto).execute()
-            await interaction.response.send_message(f"✅ Produto ID `{id_produto}` atualizado com sucesso!", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Erro ao atualizar: {e}", ephemeral=True)
-
-    @app_commands.command(name="produto_remover", description="Remove um produto pelo ID")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def produto_remover(self, interaction: discord.Interaction, id_produto: int):
-        if not supabase:
-            await interaction.response.send_message("❌ Banco de dados desativado.", ephemeral=True)
-            return
-
-        try:
-            supabase.table("products").update({"is_active": False}).eq("id", id_produto).execute() # ou delete()
-            supabase.table("products").delete().eq("id", id_produto).execute()
-            await interaction.response.send_message(f"🗑️ Produto ID `{id_produto}` removido com sucesso!", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Erro ao remover: {e}", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(ShopCog(bot))
