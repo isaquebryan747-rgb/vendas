@@ -1,17 +1,16 @@
-import crcmod
-
 def gerar_crc16(dados: str) -> str:
-    # Cria a função CRC16 padrão do Pix usando o gerador padrão do crcmod para o polinômio 0x1021
-    crc_func = crcmod.Crc(0x1021, rev=False, initCrc=0xFFFF, xorOut=0x0000).crc
-    
-    # Adiciona os bytes indicativos do CRC do Pix ("6304")
-    dados_com_crc = dados + "6304"
-    
-    # Calcula o CRC16
-    valor_crc = crc_func(dados_com_crc.encode('utf-8'))
-    
-    # Retorna o valor em formato hexadecimal maiúsculo com 4 dígitos
-    return f"{valor_crc:04X}"
+    """Calcula o CRC16-CCITT (XModem) em Python puro para o padrão Pix."""
+    crc = 0xFFFF
+    for char in dados:
+        crc ^= ord(char) << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = (crc << 1) ^ 0x1021
+            else:
+                crc = crc << 1
+            crc &= 0xFFFF
+            
+    return f"{crc:04X}"
 
 def gerar_payload_pix(chave: str, nome: str, cidade: str, valor: float, identificador: str) -> str:
     """Gera a string Pix Copia e Cola (BR Code) oficial do Banco Central."""
@@ -46,5 +45,7 @@ def gerar_payload_pix(chave: str, nome: str, cidade: str, valor: float, identifi
         additional_data
     )
 
-    crc = gerar_crc16(payload_sem_crc)
-    return payload_sem_crc + "6304" + crc
+    payload_para_crc = payload_sem_crc + "6304"
+    crc = gerar_crc16(payload_para_crc)
+    
+    return payload_para_crc + crc
