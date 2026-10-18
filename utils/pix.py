@@ -1,15 +1,18 @@
 import crcmod
 
 def gerar_crc16(dados: str) -> str:
-    # CRC16-CCITT padrão Pix (XModem / 0x1021)
-    crc_func = crcmod.mkCrcFun(0x1021, rev=False, initCrc=0xFFFF, xorOut=0x0000)
+    # O crcmod exige o tamanho em bits (16) no primeiro argumento, 
+    # e o polinômio do Pix (0x1021) passado através do argumento 'poly'.
+    crc_func = crcmod.mkCrcFun(16, poly=0x1021, initCrc=0xFFFF, rev=False, xorOut=0x0000)
     
-    # Se o crcmod exigir o polinômio com o tamanho em bits explícito, usamos a função padrão do XModem:
-    # Caso prefira garantir 100%, vamos usar o crcmod com polinomio nativo:
-    # Adiciona o ID do CRC ('6304') ao final para o cálculo
-    byte_array = (payload + "6304").encode("utf-8")
-    crc = crc_func(byte_array)
-    return f"{crc:04X}"
+    # Adiciona os bytes indicativos do CRC do Pix ("6304")
+    dados_com_crc = dados + "6304"
+    
+    # Calcula o CRC16
+    valor_crc = crc_func(dados_com_crc.encode('utf-8'))
+    
+    # Retorna o valor em formato hexadecimal maiúsculo com 4 dígitos
+    return f"{valor_crc:04X}"
 
 def gerar_payload_pix(chave: str, nome: str, cidade: str, valor: float, identificador: str) -> str:
     """Gera a string Pix Copia e Cola (BR Code) oficial do Banco Central."""
