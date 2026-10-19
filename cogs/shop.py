@@ -27,10 +27,11 @@ class OrderRequestModal(discord.ui.Modal, title="Solicitação de Pedido"):
         max_length=50
     )
 
-    def __init__(self, produto: dict, channel: discord.TextChannel):
+    def __init__(self, produto: dict, channel: discord.TextChannel, client_user: discord.Member):
         super().__init__()
         self.produto = produto
         self.channel = channel
+        self.client_user = client_user
 
     async def on_submit(self, interaction: discord.Interaction):
         codigo = self.partner_code.value.strip().upper() if self.partner_code.value else None
@@ -48,13 +49,12 @@ class OrderRequestModal(discord.ui.Modal, title="Solicitação de Pedido"):
             except Exception as e:
                 print(f"[Aviso] Erro ao buscar parceiro: {e}")
 
-        # Salva o pedido no banco
         pedido_id = None
         if supabase:
             try:
                 insert_res = supabase.table("intencoes_compra").insert({
-                    "user_id": str(interaction.user.id),
-                    "user_name": str(interaction.user),
+                    "user_id": str(self.client_user.id),
+                    "user_name": str(self.client_user),
                     "product_id": str(self.produto.get("id")),
                     "partner_code": codigo if parceiro_encontrado else (codigo if codigo else "Nenhum"),
                     "price": str(self.produto.get("price")),
@@ -66,7 +66,6 @@ class OrderRequestModal(discord.ui.Modal, title="Solicitação de Pedido"):
             except Exception as e:
                 print(f"[Aviso] Erro ao salvar intenção: {e}")
 
-        # Criar a View com os Botões de Aceite da Staff e Fechamento
         staff_view = discord.ui.View(timeout=None)
 
         btn_accept = discord.ui.Button(
@@ -83,7 +82,7 @@ class OrderRequestModal(discord.ui.Modal, title="Solicitação de Pedido"):
 
         async def accept_callback(inter: discord.Interaction):
             if not inter.user.guild_permissions.administrator:
-                await inter.response.send_message("❌ Apenas a equipe/staff pode aprovar este pedido.", ephemeral=True)
+                await inter.response.send_message("❌ Apenas a equipa/staff pode aprovar este pedido.", ephemeral=True)
                 return
 
             if supabase and pedido_id:
@@ -92,11 +91,17 @@ class OrderRequestModal(discord.ui.Modal, title="Solicitação de Pedido"):
                 except Exception as e:
                     print(f"[Erro] Erro ao atualizar pedido: {e}")
 
-            # Desativa o botão de aceite
+            # Atribui automaticamente o cargo COMPRADORES ao cliente
+            role_comprador = discord.utils.get(inter.guild.roles, name="COMPRADORES")
+            if role_comprador and self.client_user:
+                try:
+                    await self.client_user.add_roles(role_comprador)
+                except Exception as e:
+                    print(f"[Aviso] Não foi possível atribuir o cargo COMPRADORES: {e}")
+
             btn_accept.disabled = True
-            btn_accept.label = "✅ Pedido Aprovado!"
+            btn_accept.label = "✅ Pedido Aprovado e Cargo Atribuído!"
             
-            # View de pagamento para o cliente
             pay_view = discord.ui.View()
             btn_pay = discord.ui.Button(
                 label="Concluir Pagamento na Kiwify",
@@ -110,7 +115,8 @@ class OrderRequestModal(discord.ui.Modal, title="Solicitação de Pedido"):
             embed_pay = discord.Embed(
                 title="🎉 Solicitação Aprovada!",
                 description=(
-                    f"Seu pedido para **{self.produto.get('name')}** foi analisado e **APROVADO** pela equipe!\n\n"
+                    f"Seu pedido para **{self.produto.get('name')}** foi aprovado pela equipa!\n"
+                    "O cargo **COMPRADORES** foi atribuído ao seu perfil automaticamente.\n\n"
                     f"**Valor:** R$ {float(self.produto.get('price', 0)):.2f}\n"
                     "Clique no botão abaixo para efetuar o pagamento com segurança na Kiwify."
                 ),
@@ -118,10 +124,10 @@ class OrderRequestModal(discord.ui.Modal, title="Solicitação de Pedido"):
             )
 
             await inter.response.edit_message(view=staff_view)
-            await self.channel.send(content=f"{interaction.user.mention}", embed=embed_pay, view=pay_view)
+            await self.channel.send(content=f"{self.client_user.mention}", embed=embed_pay, view=pay_view)
 
         async def close_callback(inter: discord.Interaction):
-            await inter.response.send_message("🔒 Fechando este canal em 5 segundos...", ephemeral=True)
+            await inter.response.send_message("🔒 A fechar este canal em 5 segundos...", ephemeral=True)
             import asyncio
             await asyncio.sleep(5)
             await inter.channel.delete()
@@ -135,11 +141,11 @@ class OrderRequestModal(discord.ui.Modal, title="Solicitação de Pedido"):
         embed_ticket = discord.Embed(
             title=f"📥 Nova Solicitação: {self.produto.get('name')}",
             description=(
-                f"**Cliente:** {interaction.user.mention} ({interaction.user.name})\n"
+                f"**Cliente:** {self.client_user.mention} ({self.client_user.name})\n"
                 f"**Valor:** R$ {float(self.produto.get('price', 0)):.2f}\n"
                 f"**Parceiro:** `{codigo if codigo else 'Nenhum'}`\n\n"
                 f"**🔗 Links Enviados pelo Cliente:**\n```{links}```\n"
-                "Aguardando a análise da Staff para liberar o pagamento."
+                "Aguardando a análise da Staff."
             ),
             color=discord.Color.gold()
         )
@@ -147,9 +153,9 @@ class OrderRequestModal(discord.ui.Modal, title="Solicitação de Pedido"):
         if self.produto.get("image_url"):
             embed_ticket.set_thumbnail(url=self.produto.get("image_url"))
 
-        await self.channel.send(f"{interaction.user.mention} | 🔔 <@&STAFF_ID_OPCIONAL>", embed=embed_ticket, view=staff_view)
+        await self.channel.send(f"{self.client_user.mention} | 🔔 Nova solicitação recebida!", embed=embed_ticket, view=staff_view)
         await interaction.response.send_message(
-            f"🚀 Carrinho criado com sucesso! Envie os detalhes ou aguarde a aprovação no seu canal privado: {self.channel.mention}",
+            f"🚀 Carrinho criado com sucesso! Aceda ao seu canal privado aqui: {self.channel.mention}",
             ephemeral=True
         )
 
@@ -185,7 +191,7 @@ class ShopPaginator(discord.ui.View):
         
         btn_buy = discord.ui.Button(label="Comprar Produto", style=discord.ButtonStyle.success, emoji="🛒", row=1)
         
-        async def buy_callback(interaction: discord.Interaction):
+        async def buy_payload(interaction: discord.Interaction):
             guild = interaction.guild
             category = discord.utils.get(guild.categories, name="VENDAS")
 
@@ -199,7 +205,7 @@ class ShopPaginator(discord.ui.View):
             existing_channel = discord.utils.get(guild.text_channels, name=channel_name)
             
             if existing_channel:
-                await interaction.response.send_message(f"⚠️ Você já tem um carrinho aberto aqui: {existing_channel.mention}", ephemeral=True)
+                await interaction.response.send_message(f"⚠️ Já tem um carrinho aberto aqui: {existing_channel.mention}", ephemeral=True)
                 return
 
             ticket_channel = await guild.create_text_channel(
@@ -209,9 +215,9 @@ class ShopPaginator(discord.ui.View):
                 topic=f"Compra de {interaction.user.id} - Produto: {prod.get('name')}"
             )
 
-            await interaction.response.send_modal(OrderRequestModal(prod, ticket_channel))
+            await interaction.response.send_modal(OrderRequestModal(prod, ticket_channel, interaction.user))
         
-        btn_buy.callback = buy_callback
+        btn_buy.callback = buy_payload
         self.add_item(btn_buy)
         
         return embed, self
@@ -253,7 +259,7 @@ class ShopCog(commands.Cog):
         produtos = response.data
 
         if not produtos:
-            await interaction.followup.send("🛍️ Nenhum produto cadastrado no momento.", ephemeral=True)
+            await interaction.followup.send("🛍️ Nenhum produto registado no momento.", ephemeral=True)
             return
 
         paginator = ShopPaginator(produtos)
