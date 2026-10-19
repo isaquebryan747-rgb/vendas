@@ -26,26 +26,39 @@ class PartnerCodeModal(discord.ui.Modal, title="Código de Parceiro / Indicaçã
         self.channel = channel
 
     async def on_submit(self, interaction: discord.Interaction):
-        codigo = self.partner_code.value.strip() if self.partner_code.value else None
+        codigo = self.partner_code.value.strip().upper() if self.partner_code.value else None
         
+        # Link padrão do produto (caso não tenha parceiro ou o código não exista)
+        link_pagamento = self.produto.get("url", "https://kiwify.com.br")
+        parceiro_encontrado = False
+
         if codigo and supabase:
             try:
+                # Busca se existe um link de afiliado cadastrado para este código e este produto
+                res = supabase.table("parceiros_links").select("affiliate_url").eq("partner_code", codigo).eq("product_id", self.produto.get("id")).execute()
+                
+                if res.data and len(res.data) > 0:
+                    link_pagamento = res.data[0]["affiliate_url"]
+                    parceiro_encontrado = True
+
+                # Registra a intenção de compra vinculada ao parceiro
                 supabase.table("intencoes_compra").insert({
                     "user_id": str(interaction.user.id),
                     "user_name": str(interaction.user),
                     "product_id": str(self.produto.get("id")),
-                    "partner_code": codigo,
-                    "price": str(self.produto.get("price"))
+                    "partner_code": codigo if parceiro_encontrado else f"{codigo} (Inválido/Padrão)",
+                    "price": str(self.produto.get("price")),
+                    "status": "pendente"
                 }).execute()
             except Exception as e:
-                print(f"[Aviso] Erro ao registrar intenção: {e}")
+                print(f"[Aviso] Erro ao processar parceiro: {e}")
 
-        # Cria a View com os botões para o canal privado
+        # Cria os botões para o canal privado
         view = discord.ui.View()
         btn_pay = discord.ui.Button(
             label="Concluir Pagamento na Kiwify",
             style=discord.ButtonStyle.link,
-            url=self.produto.get("url", "https://kiwify.com.br"),
+            url=link_pagamento,
             emoji="💳"
         )
         view.add_item(btn_pay)
@@ -70,9 +83,8 @@ class PartnerCodeModal(discord.ui.Modal, title="Código de Parceiro / Indicaçã
             title=f"🛒 Carrinho: {self.produto.get('name')}",
             description=(
                 f"**Valor:** R$ {float(self.produto.get('price', 0)):.2f}\n"
-                f"{f'**Parceiro Aplicado:** `{codigo}`' if codigo else ''}\n\n"
-                "Clique no botão abaixo para realizar o pagamento de forma segura na Kiwify. "
-                "Após a confirmação, seu produto será liberado!"
+                f"{f'**Parceiro Aplicado:** `{codigo}` ✅' if parceiro_encontrado else (f'**Código Informado:** `{codigo}` (Não encontrado, usando link padrão)' if codigo else '')}\n\n"
+                "Clique no botão abaixo para realizar o pagamento seguro. O link de checkout acima já está direcionado corretamente para você!"
             ),
             color=discord.Color.green()
         )
@@ -80,10 +92,7 @@ class PartnerCodeModal(discord.ui.Modal, title="Código de Parceiro / Indicaçã
         if self.produto.get("image_url"):
             embed.set_thumbnail(url=self.produto.get("image_url"))
 
-        # Envia a mensagem com o link EXCLUSIVAMENTE dentro do canal privado criado
         await self.channel.send(f"{interaction.user.mention} Seja bem-vindo ao seu atendimento exclusivo!", embed=embed, view=view)
-
-        # Responde discretamente apenas para o usuário no chat público onde ele clicou
         await interaction.response.send_message(
             f"🚀 Carrinho criado com sucesso! Acesse seu canal privado aqui: {self.channel.mention}",
             ephemeral=True
